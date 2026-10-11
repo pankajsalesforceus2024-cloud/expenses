@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Ledgerline | Expense intelligence</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap"
+        rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+</head>
+
+<body>
+    <div class="shell">
+        <aside class="sidebar">
+            <div class="brand"><span class="brand-mark">L</span><span>ledgerline</span></div>
+            <div class="side-label">Workspace</div>
+            <button class="side-item active" data-view="overview" type="button"><span
+                    class="side-dot"></span>Overview</button>
+            <button class="side-item" data-view="transactions" type="button"><span
+                    class="side-dot"></span>Transactions</button>
+            <button class="side-item muted" type="button" disabled><span class="side-dot"></span>Insights
+                <small>soon</small></button>
+            <div class="sidebar-footer">
+                <div class="avatar">ME</div>
+                <div><strong>My finances</strong><span>Personal workspace</span></div>
+            </div>
+        </aside>
+        <main class="main">
+            <header class="topbar">
+                <div>
+                    <p class="eyebrow">PERSONAL FINANCE / OVERVIEW</p>
+                    <h1>Good morning<span class="accent">.</span></h1>
+                </div>
+                <form class="upload-form" action="{{ url_for('upload') }}" method="post" enctype="multipart/form-data">
+                    <label id="file-label" for="file" class="file-label">{% if workbook %}{{ workbook.name }}{% else
+                        %}Choose
+                        Expense.xlsx{% endif %}</label><input id="file" name="file" type="file" accept=".xlsx,.xls"
+                        required><button class="button" type="submit">Import workbook <span>↗</span></button>
+                </form>
+                <button class="theme-button" id="theme-toggle" type="button" title="Switch theme"
+                    aria-label="Switch theme">◐</button>
+            </header>
+            {% with messages = get_flashed_messages(with_categories=true) %}{% if messages %}<div class="messages">{%
+                for category, message in messages %}<div class="message {{ category }}">{{ message }}</div>{% endfor %}
+            </div>{% endif %}{% endwith %}
+            {% if error %}<div class="message error">{{ error }}</div>{% endif %}
+            <section class="toolbar">
+                <div><span class="toolbar-title">Spending overview</span><span class="date-caption"
+                        id="date-caption">Last 12 months</span></div>
+                <div class="filters"><label>From <input id="start" type="date"></label><label>To <input id="end"
+                            type="date"></label><select id="group">
+                        <option value="">All categories</option>
+                    </select><select id="payment">
+                        <option value="">All payments</option>
+                    </select><button class="icon-button" id="reset" title="Reset filters" type="button">↺</button></div>
+            </section>
+            <section id="empty-state" class="empty-state {% if workbook %}hidden{% endif %}">
+                <div class="empty-icon">↗</div>
+                <h2>Your ledger starts here</h2>
+                <p>Import an Excel workbook to turn your everyday spending into a clear monthly picture.</p><button
+                    class="button" type="button" onclick="document.getElementById('file').click()">Select workbook
+                    <span>↗</span></button>
+                <div class="schema">Required columns: Id, SNo, Year-Month, Date, Expense, ExpenseGroup, Amount,
+                    PaymentGroup, Remark</div>
+            </section>
+            <div id="dashboard" class="dashboard view" data-view-panel="overview">
+                <section class="kpis">
+                    <article class="kpi"><span class="kpi-label">Total expenses</span><strong id="total">—</strong><span
+                            class="kpi-note">Selected period</span></article>
+                    <article class="kpi"><span class="kpi-label">Monthly average</span><strong
+                            id="average">—</strong><span class="kpi-note">Across active months</span></article>
+                    <article class="kpi"><span class="kpi-label">Highest month</span><strong
+                            id="peak-month">—</strong><span class="kpi-note" id="peak-amount">—</span></article>
+                    <article class="kpi highlight"><span class="kpi-label">Top category</span><strong
+                            id="top-group">—</strong><span class="kpi-note" id="top-group-amount">—</span></article>
+                </section>
+                <section class="visual-grid">
+                    <article class="panel trend-panel">
+                        <div class="panel-heading">
+                            <div><span class="panel-kicker">MOMENTUM</span>
+                                <h2>Monthly spend</h2>
+                            </div>
+                            <div class="chart-controls">
+                                <div class="segmented"><button class="chart-toggle active" data-type="bar"
+                                        type="button">Bars</button><button class="chart-toggle" data-type="scatter"
+                                        type="button">Line</button></div><label class="investment-toggle"><input
+                                        id="show-investments" type="checkbox"><span>Show
+                                        investments</span></label><label class="investment-toggle"><input
+                                        id="show-income" type="checkbox"><span>Show income</span></label>
+                            </div>
+                        </div>
+                        <div id="trend-chart"></div>
+                    </article>
+                    <article class="panel donut-panel">
+                        <div class="panel-heading">
+                            <div><span class="panel-kicker">WHERE IT GOES</span>
+                                <h2>Categories</h2>
+                            </div>
+                        </div>
+                        <div id="group-chart"></div>
+                    </article>
+                </section>
+                <section class="panel year-panel">
+                    <div class="panel-heading">
+                        <div><span class="panel-kicker">LONG VIEW</span>
+                            <h2>Year over year</h2>
+                        </div>
+                        <div class="year-controls">
+                            <label>From <select id="year-start"></select></label>
+                            <label>To <select id="year-end"></select></label>
+                            <label class="series-toggle"><input id="show-year-investments"
+                                    type="checkbox"><span>Investment</span></label>
+                            <label class="series-toggle"><input id="show-year-income"
+                                    type="checkbox"><span>Income</span></label>
+                        </div>
+                    </div>
+                    <div id="year-chart"></div>
+                </section>
+                <section class="bottom-grid">
+                    <article class="panel payment-panel">
+                        <div class="panel-heading">
+                            <div><span class="panel-kicker">HOW YOU PAY</span>
+                                <h2>Payment split</h2>
+                            </div>
+                        </div>
+                        <div id="payment-chart"></div>
+                    </article>
+                    <article class="panel table-panel">
+                        <div class="panel-heading">
+                            <div><span class="panel-kicker">AT A GLANCE</span>
+                                <h2>Category ranking</h2>
+                            </div>
+                        </div>
+                        <div id="ranking"></div>
+                    </article>
+                </section>
+            </div>
+            <section id="transactions-view" class="panel records-panel view hidden" data-view-panel="transactions">
+                <div class="panel-heading records-heading">
+                    <div><span class="panel-kicker">TRANSACTION LEDGER</span>
+                        <h2>All expense records</h2>
+                        <div class="records-total">Total amount <strong id="records-total">₹0</strong></div>
+                    </div>
+                    <label class="search-box" for="record-search"><span>⌕</span><input id="record-search" type="search"
+                            placeholder="Search records..." autocomplete="off"></label>
+                </div>
+                <div class="records-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Date</th>
+                                <th>Expense</th>
+                                <th>Category</th>
+                                <th>Payment</th>
+                                <th>Remark</th>
+                                <th class="amount-cell">Amount</th>
+                            </tr>
+                        </thead>
+                        <tbody id="records-body"></tbody>
+                    </table>
+                </div>
+                <div class="pagination"><span id="record-count">0 records</span>
+                    <div><button id="previous-page" class="page-button" type="button">Previous</button><span
+                            id="page-number">1 / 1</span><button id="next-page" class="page-button"
+                            type="button">Next</button></div>
+                </div>
+            </section>
+        </main>
+    </div>
+    <script src="{{ url_for('static', filename='dashboard.js') }}"></script>
+</body>
+
+</html>
