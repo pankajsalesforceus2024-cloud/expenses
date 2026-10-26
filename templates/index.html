@@ -23,6 +23,8 @@
                     class="side-dot"></span>Overview</button>
             <button class="side-item" data-view="transactions" type="button"><span
                     class="side-dot"></span>Transactions</button>
+            <button class="side-item" id="open-expense" type="button"><span
+                    class="side-dot"></span>Add expense</button>
             <button class="side-item muted" type="button" disabled><span class="side-dot"></span>Insights
                 <small>soon</small></button>
             <div class="sidebar-footer">
@@ -149,16 +151,23 @@
                     <label class="search-box" for="record-search"><span>⌕</span><input id="record-search" type="search"
                             placeholder="Search records..." autocomplete="off"></label>
                 </div>
+                <div class="selection-bar">
+                    <span id="selection-count">0 selected</span>
+                    <button class="button" id="clone-selected" type="button" disabled>Clone selected <span>⧉</span></button>
+                    <button class="page-button" id="clear-selection" type="button" disabled>Clear</button>
+                </div>
                 <div class="records-wrap">
                     <table>
                         <thead>
                             <tr>
+                                <th class="check-cell"><input type="checkbox" id="select-all" title="Select all filtered records"></th>
                                 <th>Date</th>
                                 <th>Expense</th>
                                 <th>Category</th>
                                 <th>Payment</th>
                                 <th>Remark</th>
                                 <th class="amount-cell">Amount</th>
+                                <th></th>
                             </tr>
                         </thead>
                         <tbody id="records-body"></tbody>
@@ -172,6 +181,31 @@
             </section>
         </main>
     </div>
+    <div class="drawer-backdrop hidden" id="drawer-backdrop"></div>
+    <aside class="drawer" id="expense-drawer" aria-hidden="true">
+        <div class="drawer-head">
+            <div><p class="eyebrow" id="drawer-kicker">NEW ENTRY</p><h2 id="drawer-title">Add expense</h2></div>
+            <button class="icon-button" id="close-expense" type="button" aria-label="Close">✕</button>
+        </div>
+        <form id="clone-form" class="drawer-form hidden" autocomplete="off">
+            <p class="clone-hint" id="clone-summary"></p>
+            <label class="bulk-date">Set date for all rows<input type="date" id="clone-bulk-date"></label>
+            <div class="clone-rows" id="clone-rows"></div>
+            <div class="drawer-message hidden" id="clone-message"></div>
+            <button class="button" type="submit" id="save-clone">Create copies <span>⧉</span></button>
+        </form>
+        <form id="expense-form" class="drawer-form" autocomplete="off">
+            <label>Date<input type="date" name="date" required></label>
+            <label>Expense<input type="text" name="expense" required></label>
+            <label>Category<input type="text" name="group" list="expense-groups" required></label>
+            <label>Amount<input type="number" name="amount" step="0.01" min="0" required></label>
+            <label>Payment<input type="text" name="payment" list="expense-payments" placeholder="None"></label>
+            <label>Remark<input type="text" name="remark"></label>
+            <datalist id="expense-groups"></datalist><datalist id="expense-payments"></datalist>
+            <div class="drawer-message hidden" id="expense-message"></div>
+            <button class="button" type="submit" id="save-expense"><b id="save-label">Save expense</b> <span>↗</span></button>
+        </form>
+    </aside>
     <script src="{{ url_for('static', filename='dashboard.js') }}"></script>
 </body>
 

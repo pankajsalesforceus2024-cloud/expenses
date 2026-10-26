@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import re
+import zipfile
+from datetime import date
 from pathlib import Path
 from uuid import uuid4
+from xml.sax.saxutils import escape
 
 import pandas as pd
 from flask import Flask, flash, jsonify, redirect, render_template, request, url_for
@@ -47,7 +51,7 @@ app.config["MAX_CONTENT_LENGTH"] = 16 * 1024 * 1024
 
 
 def latest_workbook() -> Path | None:
-    files = [path for path in UPLOAD_DIR.iterdir() if path.suffix.lower() in ALLOWED_EXTENSIONS]
+    files = [path for path in UPLOAD_DIR.iterdir()     if path.suffix.lower() in ALLOWED_EXTENSIONS and not path.name.startswith("~$")]
     return max(files, key=lambda path: path.stat().st_mtime) if files else None
 
 
@@ -158,6 +162,206 @@ def yearly_series(frame: pd.DataFrame, start_year: int, end_year: int) -> pd.Ser
     selected = frame[frame["Date"].dt.year.between(start_year, end_year)]
     return selected.groupby(selected["Date"].dt.year)["Amount"].sum()
 
+
+EXPENSE_SHEET_PART = "xl/worksheets/sheet2.xml"
+LAST_DATE_FILE = BASE_DIR / "last_expense_date.txt"
+ROW_RE = re.compile(r'<row r="(\d+)"[^>]*?(?:/>|>(.*?)</row>)', re.S)
+
+
+def expense_sheet_part(archive: zipfile.ZipFile) -> str:
+    workbook = archive.read("xl/workbook.xml").decode("utf-8")
+    rels = archive.read("xl/_rels/workbook.xml.rels").decode("utf-8")
+    rid = re.search(r'<sheet [^>]*name="Expense"[^>]*r:id="([^"]+)"', workbook).group(1)
+    target = re.search(rf'<Relationship [^>]*Id="{rid}"[^>]*Target="([^"]+)"', rels)
+    if target is None:
+        target = re.search(rf'<Relationship [^>]*Target="([^"]+)"[^>]*Id="{rid}"', rels)
+    return "xl/" + target.group(1).lstrip("/").removeprefix("xl/")
+
+
+def cell_number(row_xml: str, column: str) -> float | None:
+    match = re.search(rf'<c r="{column}\d+"[^>]*>\s*<v>([^<]*)</v>', row_xml)
+    return float(match.group(1)) if match else None
+
+
+def build_row(number: int, row_id: int, sno: int, entry: dict, month_cell: str | None = None) -> str:
+    serial = (entry["date"] - date(1899, 12, 30)).days
+    year_month = f"{entry['date'].year}-{entry['date'].strftime('%b')}"
+    if month_cell is None:
+        month_cell = (
+            f'<c r="C{number}" s="7" t="str"><f>CONCATENATE(YEAR(D{number}), "-", TEXT(D{number},"mmm"))</f>'
+            f'<v>{year_month}</v></c>'
+        )
+    else:
+        # Keep the original cell: it may be the master of a shared formula used by other rows.
+        month_cell = re.sub(r"<v>[^<]*</v>", f"<v>{year_month}</v>", month_cell)
+
+    def text(col: str, value: str) -> str:
+        if not value:
+            return f'<c r="{col}{number}" s="2"/>'
+        return f'<c r="{col}{number}" s="2" t="inlineStr"><is><t xml:space="preserve">{escape(value)}</t></is></c>'
+
+    return (
+        f'<row r="{number}" spans="1:9" ht="15.75" customHeight="1">'
+        f'<c r="A{number}" s="2"><v>{row_id}</v></c>'
+        f'<c r="B{number}" s="2"><v>{sno}</v></c>'
+        f'{month_cell}'
+        f'<c r="D{number}" s="8"><v>{serial}</v></c>'
+        f'{text("E", entry["expense"])}{text("F", entry["group"])}'
+        f'<c r="G{number}" s="5"><v>{entry["amount"]!r}</v></c>'
+        f'{text("H", entry["payment"])}{text("I", entry["remark"])}</row>'
+    )
+
+
+def edit_expense_sheet(change):
+    """Run change(xml, data_rows) -> (new_xml, result) against only the Expense sheet part."""
+    workbook = latest_workbook()
+    if workbook is None or workbook.suffix.lower() != ".xlsx":
+        raise ValueError("An .xlsx expense workbook was not found. Import it first.")
+
+    # Edit the sheet XML directly so charts, pivots and images in the workbook stay intact.
+    with zipfile.ZipFile(workbook) as source:
+        part = expense_sheet_part(source)
+        xml = source.read(part).decode("utf-8")
+        rows = [(int(m.group(1)), m.group(2) or "") for m in ROW_RE.finditer(xml)]
+        data_rows = [(n, body) for n, body in rows if cell_number(body, "A") is not None]
+        xml, result = change(xml, data_rows)
+
+        temporary = workbook.with_suffix(".tmp")
+        with zipfile.ZipFile(temporary, "w", zipfile.ZIP_DEFLATED) as target:
+            for item in source.infolist():
+                data = xml.encode("utf-8") if item.filename == part else source.read(item.filename)
+                target.writestr(item, data)
+
+    try:
+        temporary.replace(workbook)
+    except PermissionError:
+        temporary.unlink(missing_ok=True)
+        raise ValueError("The workbook is open in Excel. Close it and save again.")
+    return result
+
+
+def replace_row(xml: str, number: int, new_row: str) -> str:
+    existing = re.search(rf'<row r="{number}"[^>]*?(?:/>|>.*?</row>)', xml, re.S)
+    if existing:
+        return xml[:existing.start()] + new_row + xml[existing.end():]
+    xml = xml.replace("</sheetData>", new_row + "</sheetData>", 1)
+    return re.sub(r'<dimension ref="A1:I\d+"/>', f'<dimension ref="A1:I{number}"/>', xml, 1)
+
+
+def append_expenses(entries: list[dict]) -> list[int]:
+    def change(xml, data_rows):
+        number = max(n for n, _ in data_rows)
+        new_id = int(max(cell_number(b, "A") for _, b in data_rows))
+        new_sno = int(max(cell_number(b, "B") or 0 for _, b in data_rows))
+        added = []
+        for entry in entries:
+            number, new_id, new_sno = number + 1, new_id + 1, new_sno + 1
+            xml = replace_row(xml, number, build_row(number, new_id, new_sno, entry))
+            added.append(number)
+        return xml, added
+
+    return edit_expense_sheet(change)
+
+
+def append_expense(entry: dict) -> int:
+    return append_expenses([entry])[0]
+
+
+def update_expense(row_id: int, entry: dict) -> int:
+    def change(xml, data_rows):
+        match = next(((n, b) for n, b in data_rows if cell_number(b, "A") == row_id), None)
+        if match is None:
+            raise ValueError("That record was not found in the workbook. Refresh and try again.")
+        number, body = match
+        sno = int(cell_number(body, "B") or 0)
+        month = re.search(rf'<c r="C{number}"[^>]*?(?:/>|>.*?</c>)', body, re.S)
+        month_cell = month.group(0) if month and "<f" in month.group(0) else None
+        return replace_row(xml, number, build_row(number, row_id, sno, entry, month_cell)), number
+
+    return edit_expense_sheet(change)
+
+
+def parse_entry(raw: dict) -> dict:
+    form = {key: str(value if value is not None else "").strip() for key, value in raw.items()}
+    try:
+        entry_date = date.fromisoformat(form.get("date", ""))
+        amount = float(form.get("amount", ""))
+    except ValueError:
+        raise ValueError("Enter a valid date and amount.")
+    if not form.get("expense"):
+        raise ValueError("Expense description is required.")
+    if not form.get("group"):
+        raise ValueError("Expense group is required.")
+    return {
+        "date": entry_date, "expense": form["expense"], "group": form["group"],
+        "amount": amount, "payment": form.get("payment") or "None", "remark": form.get("remark", ""),
+    }
+
+
+def default_entry_date() -> str:
+    try:
+        return date.fromisoformat(LAST_DATE_FILE.read_text().strip()).isoformat()
+    except (OSError, ValueError):
+        return date.today().isoformat()
+
+
+def option_values(column: str) -> list[str]:
+    try:
+        values = read_expenses()[column]
+    except (ValueError, KeyError):
+        return []
+    return sorted({v for v in values if v and v not in ("None", "Other", "Uncategorized")}, key=str.lower)
+
+
+@app.get("/api/expense-form")
+def expense_form_defaults():
+    return jsonify(
+        date=default_entry_date(),
+        groups=option_values("ExpenseGroup"),
+        payments=option_values("PaymentGroup"),
+    )
+
+
+@app.post("/api/expenses")
+def add_expense():
+    try:
+        entry = parse_entry(request.get_json(silent=True) or {})
+        row = append_expense(entry)
+    except ValueError as exc:
+        return jsonify(error=str(exc)), 400
+    LAST_DATE_FILE.write_text(entry["date"].isoformat())
+    return jsonify(row=row, date=entry["date"].isoformat())
+
+
+@app.put("/api/expenses/<int:row_id>")
+def edit_expense(row_id: int):
+    try:
+        entry = parse_entry(request.get_json(silent=True) or {})
+        update_expense(row_id, entry)
+    except ValueError as exc:
+        return jsonify(error=str(exc)), 400
+    return jsonify(ok=True, date=entry["date"].isoformat())
+
+
+@app.post("/api/expenses/clone")
+def clone_expenses():
+    payload = request.get_json(silent=True) or {}
+    try:
+        raw_entries = payload.get("entries") or []
+        if not raw_entries:
+            raise ValueError("There are no rows to save.")
+        entries = []
+        for position, raw in enumerate(raw_entries, start=1):
+            try:
+                entries.append(parse_entry(raw))
+            except ValueError as exc:
+                raise ValueError(f"Row {position}: {exc}")
+        rows = append_expenses(entries)
+    except ValueError as exc:
+        return jsonify(error=str(exc)), 400
+    last_date = entries[-1]["date"]
+    LAST_DATE_FILE.write_text(last_date.isoformat())
+    return jsonify(count=len(rows), date=max(e["date"] for e in entries).isoformat())
 
 @app.get("/")
 def index():

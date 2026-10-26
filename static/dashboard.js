@@ -100,7 +100,9 @@ function renderRecords() {
     const pageCount = Math.max(1, Math.ceil(filtered.length / recordsPerPage));
     currentPage = Math.min(currentPage, pageCount);
     const page = filtered.slice((currentPage - 1) * recordsPerPage, currentPage * recordsPerPage);
-    query('records-body').innerHTML = page.map(record => `<tr><td>${record.Date}</td><td><strong>${record.Expense || '—'}</strong></td><td><span class="category-tag">${record.ExpenseGroup}</span></td><td>${record.PaymentGroup}</td><td class="remark-cell">${record.Remark || '—'}</td><td class="amount-cell"><strong>${money(record.Amount)}</strong></td></tr>`).join('') || '<tr><td colspan="6" class="no-records">No matching records</td></tr>';
+    query('records-body').innerHTML = page.map(record => `<tr><td class="check-cell"><input type="checkbox" class="row-check" data-id="${record.Id}" ${selectedIds.has(Number(record.Id)) ? 'checked' : ''}></td><td>${record.Date}</td><td><strong>${record.Expense || '—'}</strong></td><td><span class="category-tag">${record.ExpenseGroup}</span></td><td>${record.PaymentGroup}</td><td class="remark-cell">${record.Remark || '—'}</td><td class="amount-cell"><strong>${money(record.Amount)}</strong></td><td class="action-cell"><button class="page-button edit-row" type="button" data-id="${record.Id}">Edit</button></td></tr>`).join('') || '<tr><td colspan="8" class="no-records">No matching records</td></tr>';
+    visibleRecords = filtered;
+    updateSelectionUi();
     query('record-count').textContent = `${filtered.length} record${filtered.length === 1 ? '' : 's'}`;
     query('records-total').textContent = money(filteredTotal);
     query('page-number').textContent = `${currentPage} / ${pageCount}`;
@@ -154,4 +156,189 @@ query('theme-toggle').addEventListener('click', () => {
     query('theme-toggle').textContent = theme === 'dark' ? '☀' : '◐';
     if (latestData) render(latestData);
 });
+
+const drawer = query('expense-drawer');
+const expenseForm = query('expense-form');
+const cloneForm = query('clone-form');
+const selectedIds = new Set();
+let visibleRecords = [];
+let editingId = null;
+
+function showMessage(id, text, kind) {
+    const box = query(id);
+    box.textContent = text || '';
+    box.className = `drawer-message ${text ? kind : 'hidden'}`;
+}
+
+function setDrawer(open) {
+    drawer.classList.toggle('open', open);
+    drawer.classList.toggle('wide', open && !cloneForm.classList.contains('hidden'));
+    drawer.setAttribute('aria-hidden', String(!open));
+    query('drawer-backdrop').classList.toggle('hidden', !open);
+    query('open-expense').classList.toggle('active', open && editingId === null && cloneForm.classList.contains('hidden'));
+}
+
+function setDrawerMode(mode) {
+    const titles = { add: ['NEW ENTRY', 'Add expense'], edit: ['EDIT ENTRY', 'Edit expense'], clone: ['CLONE ENTRIES', 'Clone expenses'] };
+    query('drawer-kicker').textContent = titles[mode][0];
+    query('drawer-title').textContent = titles[mode][1];
+    expenseForm.classList.toggle('hidden', mode === 'clone');
+    cloneForm.classList.toggle('hidden', mode !== 'clone');
+    query('save-label').textContent = mode === 'edit' ? 'Update expense' : 'Save expense';
+    showMessage('expense-message', '');
+    showMessage('clone-message', '');
+}
+
+async function loadExpenseDefaults() {
+    const data = await (await fetch('/api/expense-form')).json();
+    query('expense-groups').innerHTML = data.groups.map(v => `<option value="${v}">`).join('');
+    query('expense-payments').innerHTML = data.payments.map(v => `<option value="${v}">`).join('');
+    return data;
+}
+
+async function openAdd() {
+    editingId = null;
+    setDrawerMode('add');
+    expenseForm.reset();
+    setDrawer(true);
+    expenseForm.date.value = (await loadExpenseDefaults()).date;
+    expenseForm.expense.focus();
+}
+
+async function openEdit(id) {
+    const record = records.find(item => Number(item.Id) === Number(id));
+    if (!record) return;
+    editingId = Number(id);
+    setDrawerMode('edit');
+    setDrawer(true);
+    await loadExpenseDefaults();
+    expenseForm.date.value = record.Date;
+    expenseForm.expense.value = record.Expense;
+    expenseForm.group.value = record.ExpenseGroup === 'Uncategorized' ? '' : record.ExpenseGroup;
+    expenseForm.amount.value = record.Amount;
+    expenseForm.payment.value = ['Other', 'None'].includes(record.PaymentGroup) ? '' : record.PaymentGroup;
+    expenseForm.remark.value = record.Remark;
+    expenseForm.expense.focus();
+}
+
+async function openClone() {
+    const chosen = records.filter(item => selectedIds.has(Number(item.Id)));
+    if (!chosen.length) return;
+    editingId = null;
+    setDrawerMode('clone');
+    setDrawer(true);
+    query('clone-summary').textContent = 'Edit any field in any row. Each row is saved as a new entry at the bottom of the Expense sheet. Remove rows you do not need.';
+    const bulk = query('clone-bulk-date');
+    const groupValue = value => value === 'Uncategorized' ? '' : value;
+    const paymentValue = value => ['Other', 'None'].includes(value) ? '' : value;
+    const defaults = await loadExpenseDefaults();
+    bulk.value = defaults.date;
+    query('clone-rows').innerHTML = `<div class="clone-row clone-head"><span>Date</span><span>Expense</span><span>Category</span><span>Amount</span><span>Payment</span><span>Remark</span><span></span></div>` +
+        chosen.map(item => `<div class="clone-row"><input type="date" data-f="date" value="${defaults.date}" required><input data-f="expense" value="${escapeAttr(item.Expense)}" required><input data-f="group" list="expense-groups" value="${escapeAttr(groupValue(item.ExpenseGroup))}" required><input type="number" step="0.01" min="0" data-f="amount" value="${item.Amount}" required><input data-f="payment" list="expense-payments" placeholder="None" value="${escapeAttr(paymentValue(item.PaymentGroup))}"><input data-f="remark" value="${escapeAttr(item.Remark)}"><button type="button" class="page-button remove-clone" title="Remove row">✕</button></div>`).join('');
+    cloneForm.querySelector('[data-f="date"]').focus();
+}
+
+function escapeAttr(value) {
+    return String(value ?? '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function updateSelectionUi() {
+    const count = selectedIds.size;
+    query('selection-count').textContent = `${count} selected`;
+    query('clone-selected').disabled = count === 0;
+    query('clear-selection').disabled = count === 0;
+    const filteredIds = visibleRecords.map(item => Number(item.Id));
+    const all = query('select-all');
+    all.checked = filteredIds.length > 0 && filteredIds.every(id => selectedIds.has(id));
+    all.indeterminate = !all.checked && filteredIds.some(id => selectedIds.has(id));
+}
+
+query('open-expense').addEventListener('click', openAdd);
+query('close-expense').addEventListener('click', () => setDrawer(false));
+query('drawer-backdrop').addEventListener('click', () => setDrawer(false));
+document.addEventListener('keydown', event => { if (event.key === 'Escape') setDrawer(false); });
+query('clone-selected').addEventListener('click', openClone);
+query('clear-selection').addEventListener('click', () => { selectedIds.clear(); renderRecords(); });
+query('select-all').addEventListener('change', event => {
+    visibleRecords.forEach(item => event.target.checked ? selectedIds.add(Number(item.Id)) : selectedIds.delete(Number(item.Id)));
+    renderRecords();
+});
+query('records-body').addEventListener('change', event => {
+    if (!event.target.classList.contains('row-check')) return;
+    const id = Number(event.target.dataset.id);
+    event.target.checked ? selectedIds.add(id) : selectedIds.delete(id);
+    updateSelectionUi();
+});
+query('records-body').addEventListener('click', event => {
+    const button = event.target.closest('.edit-row');
+    if (button) openEdit(button.dataset.id);
+});
+
+function showSaved(savedDate) {
+    if (savedDate && query('end').value && savedDate > query('end').value) query('end').value = savedDate;
+    refresh();
+}
+
+async function send(url, method, payload) {
+    const response = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+    const result = await response.json();
+    return { ok: response.ok, result };
+}
+
+expenseForm.addEventListener('submit', async event => {
+    event.preventDefault();
+    const button = query('save-expense');
+    button.disabled = true;
+    try {
+        const payload = Object.fromEntries(new FormData(expenseForm));
+        const { ok, result } = editingId === null
+            ? await send('/api/expenses', 'POST', payload)
+            : await send(`/api/expenses/${editingId}`, 'PUT', payload);
+        if (!ok) { showMessage('expense-message', result.error, 'error'); return; }
+        if (editingId !== null) {
+            setDrawer(false);
+            editingId = null;
+        } else {
+            // Keep the chosen date for the next entry; clear the rest.
+            ['expense', 'group', 'amount', 'payment', 'remark'].forEach(name => expenseForm[name].value = '');
+            expenseForm.date.value = result.date;
+            showMessage('expense-message', `Saved to Excel row ${result.row}.`, 'success');
+            expenseForm.expense.focus();
+        }
+        showSaved(result.date || expenseForm.date.value);
+    } catch (error) {
+        showMessage('expense-message', 'Could not save the expense.', 'error');
+    } finally {
+        button.disabled = false;
+    }
+});
+
+cloneForm.addEventListener('click', event => {
+    const remove = event.target.closest('.remove-clone');
+    if (remove) remove.closest('.clone-row').remove();
+});
+query('clone-bulk-date').addEventListener('change', event => {
+    if (event.target.value) cloneForm.querySelectorAll('[data-f="date"]').forEach(input => input.value = event.target.value);
+});
+
+cloneForm.addEventListener('submit', async event => {
+    event.preventDefault();
+    const entries = [...cloneForm.querySelectorAll('.clone-row:not(.clone-head)')].map(row =>
+        Object.fromEntries([...row.querySelectorAll('[data-f]')].map(input => [input.dataset.f, input.value])));
+    if (!entries.length) { showMessage('clone-message', 'There are no rows to save.', 'error'); return; }
+    const button = query('save-clone');
+    button.disabled = true;
+    try {
+        const { ok, result } = await send('/api/expenses/clone', 'POST', { entries });
+        if (!ok) { showMessage('clone-message', result.error, 'error'); return; }
+        selectedIds.clear();
+        setDrawer(false);
+        showSaved(result.date);
+    } catch (error) {
+        showMessage('clone-message', 'Could not clone the records.', 'error');
+    } finally {
+        button.disabled = false;
+    }
+});
 refresh();
+
