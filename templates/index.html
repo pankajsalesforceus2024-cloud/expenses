@@ -25,8 +25,8 @@
                     class="side-dot"></span>Transactions</button>
             <button class="side-item" id="open-expense" type="button"><span
                     class="side-dot"></span>Add expense</button>
-            <button class="side-item muted" type="button" disabled><span class="side-dot"></span>Insights
-                <small>soon</small></button>
+            <button class="side-item" data-view="insights" type="button"><span
+                    class="side-dot"></span>Insights</button>
             <div class="sidebar-footer">
                 <div class="avatar">ME</div>
                 <div><strong>My finances</strong><span>Personal workspace</span></div>
@@ -51,7 +51,7 @@
                 for category, message in messages %}<div class="message {{ category }}">{{ message }}</div>{% endfor %}
             </div>{% endif %}{% endwith %}
             {% if error %}<div class="message error">{{ error }}</div>{% endif %}
-            <section class="toolbar">
+            <section class="toolbar" id="toolbar">
                 <div><span class="toolbar-title">Spending overview</span><span class="date-caption"
                         id="date-caption">Last 12 months</span></div>
                 <div class="filters"><label>From <input id="start" type="date"></label><label>To <input id="end"
@@ -142,6 +142,161 @@
                     </article>
                 </section>
             </div>
+            <section id="insights-view" class="insights view hidden" data-view-panel="insights">
+                <div class="message error hidden" id="insights-error"></div>
+                <div id="insights-body">
+                    <div class="insights-head"><span class="toolbar-title">Mutual fund insights</span><span
+                            class="date-caption" id="insights-caption"></span></div>
+                    <section class="kpis" id="mf-kpis"></section>
+                    <section class="panel insights-panel">
+                        <div class="panel-heading">
+                            <div><span class="panel-kicker">WHAT THE DATA SAYS</span>
+                                <h2>Key takeaways</h2>
+                            </div>
+                        </div>
+                        <div class="insight-list" id="insight-list"></div>
+                    </section>
+                    <section class="panel insights-panel">
+                        <div class="panel-heading">
+                            <div><span class="panel-kicker">GROWTH</span>
+                                <h2>Invested vs current value</h2>
+                            </div>
+                        </div>
+                        <div id="mf-growth-chart" class="mf-chart"></div>
+                    </section>
+                    <section class="bottom-grid">
+                        <article class="panel">
+                            <div class="panel-heading">
+                                <div><span class="panel-kicker">MARKET MOVES</span>
+                                    <h2>Monthly gain / loss</h2>
+                                </div>
+                            </div>
+                            <div id="mf-gain-chart" class="mf-chart"></div>
+                        </article>
+                        <article class="panel">
+                            <div class="panel-heading">
+                                <div><span class="panel-kicker">YEAR BY YEAR</span>
+                                    <h2>Money added vs market gain</h2>
+                                </div>
+                            </div>
+                            <div id="mf-year-chart" class="mf-chart"></div>
+                        </article>
+                    </section>
+                    <section class="bottom-grid">
+                        <article class="panel">
+                            <div class="panel-heading">
+                                <div><span class="panel-kicker">REPORTED</span>
+                                    <h2>Annual return (from sheet)</h2>
+                                </div>
+                            </div>
+                            <div id="mf-return-chart" class="mf-chart"></div>
+                        </article>
+                        <article class="panel">
+                            <div class="panel-heading">
+                                <div><span class="panel-kicker">MILESTONES</span>
+                                    <h2>Portfolio value reached</h2>
+                                </div>
+                            </div>
+                            <div id="mf-milestones" class="milestones"></div>
+                            <div id="mf-flows" class="flow-note"></div>
+                        </article>
+                    </section>
+                    <section class="panel insights-panel" id="plan-panel">
+                        <div class="panel-heading">
+                            <div><span class="panel-kicker">SIP PLANNER</span>
+                                <h2>How much can I increase the SIP?</h2>
+                            </div>
+                        </div>
+                        <div class="plan-context" id="plan-context"></div>
+                        <div class="table-wrap">
+                            <table class="mf-table">
+                                <thead>
+                                    <tr><th>Option</th><th>New SIP</th><th>Increase</th><th>Extra / month</th><th>% of income</th><th>Vs salary surplus</th></tr>
+                                </thead>
+                                <tbody id="plan-body"></tbody>
+                            </table>
+                        </div>
+                    </section>
+                    <section class="bottom-grid">
+                        <article class="panel">
+                            <div class="panel-heading">
+                                <div><span class="panel-kicker">SIP</span>
+                                    <h2>SIP over time</h2>
+                                </div>
+                            </div>
+                            <div id="sip-chart" class="mf-chart"></div>
+                        </article>
+                        <article class="panel">
+                            <div class="panel-heading">
+                                <div><span class="panel-kicker">STEP-UP</span>
+                                    <h2>How much SIP rose each year</h2>
+                                </div>
+                            </div>
+                            <div id="sip-year-chart" class="mf-chart"></div>
+                        </article>
+                    </section>
+                    <section class="panel insights-panel" id="liquid-panel">
+                        <div class="panel-heading">
+                            <div><span class="panel-kicker">LIQUID FUND</span>
+                                <h2>Deposits, withdrawals and running net</h2>
+                            </div>
+                        </div>
+                        <div class="liquid-stats" id="liquid-stats"></div>
+                        <div id="liquid-chart" class="mf-chart"></div>
+                    </section>
+                    <section class="bottom-grid">
+                        <article class="panel">
+                            <div class="panel-heading">
+                                <div><span class="panel-kicker">SIP HISTORY</span>
+                                    <h2>Every raise</h2>
+                                </div>
+                            </div>
+                            <div class="table-wrap">
+                                <table class="mf-table">
+                                    <thead>
+                                        <tr><th>Month</th><th>From</th><th>To</th><th>Raise</th><th>After</th></tr>
+                                    </thead>
+                                    <tbody id="sip-steps-body"></tbody>
+                                </table>
+                            </div>
+                        </article>
+                        <article class="panel">
+                            <div class="panel-heading">
+                                <div><span class="panel-kicker">LIQUID BY YEAR</span>
+                                    <h2>Yearly liquid flows</h2>
+                                </div>
+                            </div>
+                            <div class="table-wrap">
+                                <table class="mf-table">
+                                    <thead>
+                                        <tr><th>Year</th><th>Deposit</th><th>Withdrawal</th><th>Net to MF</th></tr>
+                                    </thead>
+                                    <tbody id="liquid-year-body"></tbody>
+                                </table>
+                            </div>
+                        </article>
+                    </section>
+                    <section class="panel insights-panel">
+                        <div class="panel-heading">
+                            <div><span class="panel-kicker">LONG VIEW</span>
+                                <h2>Yearly summary</h2>
+                            </div>
+                        </div>
+                        <div class="table-wrap">
+                            <table class="mf-table">
+                                <thead>
+                                    <tr><th>Year</th><th>Money added</th><th>Market gain</th><th>Return</th><th>Year-end value</th></tr>
+                                </thead>
+                                <tbody id="mf-year-body"></tbody>
+                            </table>
+                        </div>
+                    </section>
+                    <section class="panel insights-panel">
+                        <span class="panel-kicker">NOTES</span>
+                        <ul class="mf-notes" id="mf-notes"></ul>
+                    </section>
+                </div>
+            </section>
             <section id="transactions-view" class="panel records-panel view hidden" data-view-panel="transactions">
                 <div class="panel-heading records-heading">
                     <div><span class="panel-kicker">TRANSACTION LEDGER</span>

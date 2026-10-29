@@ -10,6 +10,9 @@ from xml.sax.saxutils import escape
 import pandas as pd
 from flask import Flask, flash, jsonify, redirect, render_template, request, url_for
 
+from mf_insights import SHEET_NAME, build_mf_insights
+from workbook_cache import cached_sheets
+
 BASE_DIR = Path(__file__).resolve().parent
 UPLOAD_DIR = BASE_DIR / "uploads"
 UPLOAD_DIR.mkdir(exist_ok=True)
@@ -27,7 +30,7 @@ def clean_column_name(value: object) -> str:
 
 
 def read_workbook_table(workbook: Path, required_columns: set[str] = REQUIRED_COLUMNS) -> pd.DataFrame:
-    sheets = pd.read_excel(workbook, sheet_name=None, header=None)
+    sheets = cached_sheets(workbook)
     for sheet_name, raw in sheets.items():
         for header_row, row in raw.iterrows():
             columns = [clean_column_name(value) for value in row.tolist()]
@@ -392,6 +395,21 @@ def upload():
     else:
         flash(f"Imported {destination.name} successfully.", "success")
     return redirect(url_for("index"))
+
+
+@app.get("/api/mf-insights")
+def mf_insights():
+    workbook = latest_workbook()
+    if workbook is None:
+        return jsonify(available=False, error="Import a workbook first.")
+    try:
+        try:
+            income, expenses = read_income(), read_expenses()
+        except Exception:
+            income = expenses = None
+        return jsonify(build_mf_insights(workbook, income, expenses))
+    except Exception as exc:
+        return jsonify(available=False, error=f"Could not analyse the {SHEET_NAME} sheet: {exc}")
 
 
 @app.get("/api/dashboard")

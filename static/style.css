@@ -606,6 +606,110 @@ td strong {
   color: #b8c1bd;
   cursor: default;
 }
+.insights-head {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.insights-panel {
+  margin-top: 13px;
+}
+.insight-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 12px;
+  margin-top: 16px;
+}
+.insight {
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--muted);
+  border-radius: 6px;
+  padding: 13px 15px;
+}
+.insight.good { border-left-color: var(--green); }
+.insight.warn { border-left-color: #d6a928; }
+.insight.bad { border-left-color: #d6534f; }
+.insight strong {
+  font: 600 13px "Space Grotesk";
+}
+.insight p {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.55;
+}
+.mf-chart {
+  height: 320px;
+}
+.milestones {
+  display: grid;
+  gap: 8px;
+  margin-top: 16px;
+}
+.milestone {
+  display: flex;
+  justify-content: space-between;
+  padding: 11px 14px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font-size: 13px;
+}
+.flow-note {
+  margin-top: 14px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.6;
+}
+.table-wrap {
+  overflow-x: auto;
+  margin-top: 12px;
+}
+.mf-table {
+  min-width: 560px;
+}
+.mf-table small {
+  color: var(--muted);
+}
+.plan-context,
+.liquid-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 16px 0 6px;
+}
+.plan-stat {
+  flex: 1 1 150px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 11px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.plan-stat span,
+.plan-stat small {
+  color: var(--muted);
+  font-size: 11px;
+}
+.plan-stat strong {
+  font: 700 18px "Space Grotesk";
+}
+.plan-note {
+  flex-basis: 100%;
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+.pos { color: var(--green); }
+.neg { color: #d6534f; }
+.mf-notes {
+  margin: 10px 0 0;
+  padding-left: 18px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.7;
+}
 @media (max-width: 900px) {
   .sidebar {
     width: 70px;

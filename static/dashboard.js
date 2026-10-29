@@ -91,6 +91,108 @@ function activeViewIs(view) {
 function switchView(view) {
     document.querySelectorAll('.side-item[data-view]').forEach(item => item.classList.toggle('active', item.dataset.view === view));
     document.querySelectorAll('[data-view-panel]').forEach(panel => panel.classList.toggle('hidden', panel.dataset.viewPanel !== view));
+    query('toolbar').classList.toggle('hidden', view === 'insights');
+}
+
+let insightsData = null;
+const compact = value => {
+    const sign = value < 0 ? '-' : '', amount = Math.abs(value);
+    if (amount >= 1e7) return `${sign}₹${(amount / 1e7).toFixed(2)} Cr`;
+    if (amount >= 1e5) return `${sign}₹${(amount / 1e5).toFixed(2)} L`;
+    return `${sign}₹${Math.round(amount).toLocaleString('en-IN')}`;
+};
+const pct = value => value === null || value === undefined ? '—' : `${value.toFixed(1)}%`;
+const tone = value => value >= 0 ? 'pos' : 'neg';
+
+function renderInsights(data) {
+    query('insights-error').classList.toggle('hidden', data.available);
+    query('insights-body').classList.toggle('hidden', !data.available);
+    if (!data.available) { query('insights-error').textContent = data.error; return; }
+    const k = data.kpis, s = data.series;
+    query('insights-caption').textContent = `${data.since} — ${data.as_of} · MonthlyMF sheet`;
+    const card = (label, value, note, cls = '') => `<article class="kpi ${cls}"><span class="kpi-label">${label}</span><strong>${value}</strong><span class="kpi-note">${note}</span></article>`;
+    query('mf-kpis').innerHTML =
+        card('Current value', compact(k.value), `Invested ${compact(k.invested)}`, 'highlight') +
+        card('Total profit', compact(k.profit), `${pct(k.profit_pct)} on invested`) +
+        card('Annualised return', pct(k.xirr), `Last 12 months ${pct(k.trailing_xirr)}`) +
+        card('From peak', pct(k.drawdown), `Peak ${compact(k.peak_value)} · ${k.peak_month}`);
+    query('insight-list').innerHTML = data.insights.map(item => `<div class="insight ${item.tone}"><strong>${item.title}</strong><p>${item.text}</p></div>`).join('');
+
+    const styles = getComputedStyle(document.body);
+    const green = styles.getPropertyValue('--green').trim(), orange = styles.getPropertyValue('--orange').trim();
+    const hover = '%{x|%b %Y}<br><b>₹%{y:,.0f}</b><extra></extra>';
+    plot('mf-growth-chart', [
+        { x: s.months, y: s.invested, type: 'scatter', mode: 'lines', name: 'Invested', line: { color: orange, width: 2 }, hovertemplate: hover },
+        { x: s.months, y: s.value, type: 'scatter', mode: 'lines', name: 'Current value', line: { color: green, width: 3 }, fill: 'tonexty', fillcolor: 'rgba(30,117,101,0.12)', hovertemplate: hover },
+    ], { margin: { t: 12, r: 20, b: 40, l: 70 }, xaxis: { fixedrange: true }, yaxis: { tickprefix: '₹', fixedrange: true }, showlegend: true, legend: { orientation: 'h', y: 1.1, x: 0 } });
+    plot('mf-gain-chart', [{ x: s.gain_months, y: s.gain, type: 'bar', marker: { color: s.gain.map(v => v >= 0 ? green : '#d6534f') }, hovertemplate: hover }],
+        { margin: { t: 12, r: 20, b: 40, l: 70 }, xaxis: { fixedrange: true }, yaxis: { tickprefix: '₹', fixedrange: true }, showlegend: false });
+    const years = data.years.map(y => String(y.year));
+    plot('mf-year-chart', [
+        { x: years, y: data.years.map(y => y.net_invested), type: 'bar', name: 'Money added', marker: { color: orange }, hovertemplate: '%{x}<br><b>₹%{y:,.0f}</b><extra></extra>' },
+        { x: years, y: data.years.map(y => y.gain), type: 'bar', name: 'Market gain', marker: { color: green }, hovertemplate: '%{x}<br><b>₹%{y:,.0f}</b><extra></extra>' },
+    ], { barmode: 'group', margin: { t: 12, r: 20, b: 40, l: 70 }, xaxis: { fixedrange: true, type: 'category' }, yaxis: { tickprefix: '₹', fixedrange: true }, showlegend: true, legend: { orientation: 'h', y: 1.15, x: 0 } });
+    plot('mf-return-chart', [{ x: s.reported_months, y: s.reported_return, type: 'scatter', mode: 'lines', line: { color: green, width: 3 }, hovertemplate: '%{x|%b %Y}<br><b>%{y:.1f}%</b><extra></extra>' }],
+        { margin: { t: 12, r: 20, b: 40, l: 50 }, xaxis: { fixedrange: true }, yaxis: { ticksuffix: '%', fixedrange: true }, showlegend: false });
+    query('mf-milestones').innerHTML = data.milestones.map(m => `<div class="milestone"><span>${m.label}</span><strong>${m.month}</strong></div>`).join('');
+    query('mf-flows').innerHTML = `Withdrawal column: <b>${compact(k.withdrawal_total)}</b> total, <b>${compact(k.withdrawal_12m)}</b> in the last 12 months · Deposit column: <b>${compact(k.deposit_total)}</b> total, <b>${compact(k.deposit_12m)}</b> in the last 12 months`;
+    query('mf-year-body').innerHTML = [...data.years].reverse().map(y => `<tr><td><strong>${y.year}</strong>${y.partial ? ' <small>partial</small>' : ''}</td><td>${compact(y.net_invested)}</td><td class="${tone(y.gain)}">${compact(y.gain)}</td><td class="${tone(y.return_pct || 0)}">${pct(y.return_pct)}</td><td>${compact(y.end_value)}</td></tr>`).join('');
+    query('mf-notes').innerHTML = data.notes.map(note => `<li>${note}</li>`).join('');
+    renderSipLiquid(data, { green, orange });
+}
+
+function renderSipLiquid(data, colors) {
+    const { green, orange } = colors, red = '#d6534f';
+    const axes = { margin: { t: 12, r: 20, b: 40, l: 70 }, xaxis: { fixedrange: true }, yaxis: { tickprefix: '₹', fixedrange: true } };
+    const sip = data.sip, liquid = data.liquid, plan = data.plan;
+
+    query('plan-panel').classList.toggle('hidden', !plan);
+    if (plan) {
+        const cash = plan.cash;
+        query('plan-context').innerHTML = `<div class="plan-stat"><span>Current SIP</span><strong>${compact(plan.current)}</strong></div>` +
+            `<div class="plan-stat"><span>Actually invested / month (12m)</span><strong>${compact(plan.avg_actual)}</strong></div>` +
+            (cash ? `<div class="plan-stat"><span>Avg income</span><strong>${compact(cash.avg_income)}</strong></div>` +
+                `<div class="plan-stat"><span>Avg expenses</span><strong>${compact(cash.avg_expense)}</strong></div>` +
+                `<div class="plan-stat"><span>Salary surplus</span><strong>${compact(cash.surplus)}</strong></div>` : '') +
+            (cash ? `<p class="plan-note">Based on income and expenses from ${cash.from} to ${cash.to}.</p>` : '<p class="plan-note">Add Income and Expense data to compare against your salary surplus.</p>');
+        query('plan-body').innerHTML = plan.options.map(o => `<tr><td><strong>${o.label}</strong></td><td>${compact(o.sip)}</td><td class="pos">+${o.pct.toFixed(1)}%</td><td>${compact(o.extra)}</td><td>${o.income_share === null ? '—' : pct(o.income_share)}</td><td class="${o.fits === null ? '' : o.fits ? 'pos' : 'neg'}">${o.gap === null ? '—' : o.fits ? `${compact(-o.gap)} to spare` : `${compact(o.gap)} short`}</td></tr>`).join('')
+            || `<tr><td colspan="6" class="no-records">No room to raise the SIP from current surplus.</td></tr>`;
+    }
+
+    query('sip-chart').parentElement.classList.toggle('hidden', !sip);
+    query('sip-year-chart').parentElement.classList.toggle('hidden', !sip);
+    if (sip) {
+        plot('sip-chart', [{ x: sip.series_months, y: sip.series_sip, type: 'scatter', mode: 'lines', line: { shape: 'hv', color: green, width: 3 }, name: 'SIP', hovertemplate: '%{x|%b %Y}<br><b>₹%{y:,.0f}</b><extra></extra>' }],
+            { ...axes, showlegend: false });
+        const yearly = sip.yearly.filter(y => y.pct !== null);
+        plot('sip-year-chart', [{ x: yearly.map(y => String(y.year)), y: yearly.map(y => y.pct), type: 'bar', marker: { color: yearly.map(y => y.pct > 0 ? green : '#b5bdb9') }, text: yearly.map(y => `${y.pct.toFixed(0)}%`), textposition: 'outside', hovertemplate: '%{x}<br><b>%{y:.1f}%</b> raise<extra></extra>' }],
+            { ...axes, xaxis: { fixedrange: true, type: 'category' }, yaxis: { ticksuffix: '%', fixedrange: true }, showlegend: false });
+        query('sip-steps-body').innerHTML = [...sip.steps].reverse().map(s => `<tr><td><strong>${s.month}</strong></td><td>${compact(s.from)}</td><td>${compact(s.to)}</td><td class="pos">+${s.pct.toFixed(1)}%</td><td>${s.gap_months} mo later</td></tr>`).join('') || '<tr><td colspan="5" class="no-records">No raises yet</td></tr>';
+    }
+
+    query('liquid-panel').classList.toggle('hidden', !liquid);
+    query('liquid-year-body').closest('article').classList.toggle('hidden', !liquid);
+    if (liquid) {
+        const stat = (label, value, note) => `<div class="plan-stat"><span>${label}</span><strong>${value}</strong><small>${note}</small></div>`;
+        query('liquid-stats').innerHTML =
+            stat('Deposited (12m)', compact(liquid.deposit_12m), `${liquid.deposit_months_12m} months · avg ${compact(liquid.avg_deposit)}`) +
+            stat('Withdrawn (12m)', compact(liquid.withdrawal_12m), `${liquid.withdrawal_months_12m} months · avg ${compact(liquid.avg_withdrawal)}`) +
+            stat('Net into MF (all time)', compact(-liquid.net_total), 'Deposits minus withdrawals');
+        const net = liquid.balance.map(v => -v);
+        plot('liquid-chart', [
+            { x: liquid.months, y: liquid.deposit, type: 'bar', name: 'Deposit', marker: { color: green }, hovertemplate: '%{x|%b %Y}<br><b>₹%{y:,.0f}</b><extra></extra>' },
+            { x: liquid.months, y: liquid.withdrawal.map(v => -v), type: 'bar', name: 'Withdrawal', marker: { color: orange }, hovertemplate: '%{x|%b %Y}<br><b>₹%{customdata:,.0f}</b><extra></extra>', customdata: liquid.withdrawal },
+            { x: liquid.months, y: net, type: 'scatter', mode: 'lines', name: 'Running net into MF', yaxis: 'y2', line: { color: red, width: 2 }, hovertemplate: '%{x|%b %Y}<br><b>₹%{y:,.0f}</b><extra></extra>' },
+        ], { ...axes, barmode: 'relative', margin: { t: 12, r: 70, b: 40, l: 70 }, yaxis2: { overlaying: 'y', side: 'right', tickprefix: '₹', showgrid: false, fixedrange: true }, showlegend: true, legend: { orientation: 'h', y: 1.1, x: 0 } });
+        query('liquid-year-body').innerHTML = [...liquid.yearly].reverse().map(y => `<tr><td><strong>${y.year}</strong></td><td>${compact(y.deposit)}</td><td>${compact(y.withdrawal)}</td><td class="${tone(y.deposit - y.withdrawal)}">${compact(y.deposit - y.withdrawal)}</td></tr>`).join('');
+    }
+}
+
+async function loadInsights() {
+    if (!insightsData) query('insights-caption').textContent = 'Loading…';
+    try { insightsData = await (await fetch('/api/mf-insights', { cache: 'no-store' })).json(); }
+    catch { insightsData = { available: false, error: 'Could not load insights.' }; }
+    renderInsights(insightsData);
 }
 
 function renderRecords() {
@@ -140,6 +242,7 @@ query('next-page').addEventListener('click', () => { currentPage += 1; renderRec
 document.querySelectorAll('.side-item[data-view]').forEach(item => item.addEventListener('click', () => {
     switchView(item.dataset.view);
     if (item.dataset.view === 'transactions') renderRecords();
+    if (item.dataset.view === 'insights') loadInsights();
 }));
 document.querySelectorAll('.chart-toggle').forEach(button => button.addEventListener('click', () => { document.querySelectorAll('.chart-toggle').forEach(item => item.classList.remove('active')); button.classList.add('active'); chartType = button.dataset.type; refresh(); }));
 query('show-investments').addEventListener('change', event => { showInvestments = event.target.checked; if (latestData) render(latestData); });
@@ -155,6 +258,7 @@ query('theme-toggle').addEventListener('click', () => {
     localStorage.setItem('ledgerline-theme', theme);
     query('theme-toggle').textContent = theme === 'dark' ? '☀' : '◐';
     if (latestData) render(latestData);
+    if (insightsData && activeViewIs('insights')) renderInsights(insightsData);
 });
 
 const drawer = query('expense-drawer');
